@@ -1,0 +1,10 @@
+# Directorio de dependencias
+node_modules/
+
+# Archivos de logs y debug
+npm-debug.log*
+.eslintcache
+
+# Variables de Entorno 
+.env 
+.env.*
