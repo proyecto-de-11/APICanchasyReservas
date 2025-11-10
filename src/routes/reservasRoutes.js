@@ -1,11 +1,15 @@
 // routes/reservasRoutes.js
 import express from 'express';
-import { getAllReservas, createReserva } from '../controllers/reservasController.js';
-
+import { createSolicitud, getAllReservas, processSolicitud } from '../controllers/reservasController.js';
 const router = express.Router();
 
-router.get('/', getAllReservas);
-router.post('/', createReserva);
-// ...
+// Cliente: Inicia el flujo, crea la solicitud
+router.post('/reservas', createSolicitud); 
+
+// Administrador/Dev: Obtener todas las reservas
+router.get('/reservas', getAllReservas);
+
+router.put('/solicitudes/:solicitudId/process', processSolicitud);
+
 
 export default router;
