@@ -3,6 +3,8 @@ import './config/db.js';
 import bodyParser from 'body-parser';
 import cors from 'cors';
 import reservasRoutes from './routes/reservasRoutes.js';
+import canchasRoutes from './routes/canchasRoutes.js';
+
 const app = express();
 
 
@@ -17,6 +19,8 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api', reservasRoutes);
+app.use('/api', canchasRoutes);
+
 
 const port = parseInt(process.env.PORT) || 3000;
 app.listen(port, () => {
