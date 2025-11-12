@@ -62,7 +62,7 @@ CREATE TABLE canchas (
     ancho_metros DECIMAL(5, 2),
     precio_hora DECIMAL(10, 2) NOT NULL,
     precio_hora_fin_semana DECIMAL(10, 2), -- Precio diferenciado
-    imagenes JSON, -- Array de URLs de imágenes
+    imagenes MEDIUMBLOB,  
     servicios_adicionales JSON, -- ['vestuarios', 'estacionamiento', 'cafetería', etc.]
     ubicacion TEXT, -- Dirección específica si difiere de la empresa
     coordenadas_lat DECIMAL(10, 8),

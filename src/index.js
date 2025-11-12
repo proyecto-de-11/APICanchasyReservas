@@ -4,9 +4,15 @@ import bodyParser from 'body-parser';
 import cors from 'cors';
 import reservasRoutes from './routes/reservasRoutes.js';
 import canchasRoutes from './routes/canchasRoutes.js';
+import multer from 'multer'; // Importar Multer
 
 const app = express();
+const upload = multer(); // Inicializar Multer sin destino de guardado por defecto (lo gestionamos después)
 
+// Configuración de Middlewares
+// Express para JSON (generalmente usado, pero NO para multipart)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 app.use(cors()); 
 
