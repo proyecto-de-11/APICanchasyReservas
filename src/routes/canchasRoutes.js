@@ -7,11 +7,7 @@ import {
     getAllCanchas,        
     updateCancha,         
     disableCancha,
-    enableCancha,
-    getCanchaHorarios,
-    createHorario,  
-    updateHorario,  
-    deleteHorario
+    enableCancha
 } from '../controllers/canchasController.js'; 
 import multer from 'multer';
 
@@ -39,23 +35,5 @@ router.get('/empresa/:canchaId', getCanchaPropietario);
 
 // Obtener una cancha específica por ID, incluyendo la imagen BLOB
 router.get('/canchas/:canchaId', upload.single('imagen'), getCanchaById);
-
-
-
-
-
-
-
-// Ruta para obtener horarios de disponibilidad
-router.get('/canchas/horarios/:canchaId', getCanchaHorarios);
-
-// Crear un nuevo horario recurrente
-router.post('/canchas/horarios', createHorario); 
-
-// Actualizar un horario recurrente por su ID
-router.put('/canchas/horarios/:horarioId', updateHorario); 
-
-// Eliminar un horario recurrente por su ID
-router.delete('/canchas/horarios/:horarioId', deleteHorario);
 
 export default router;

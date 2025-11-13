@@ -4,6 +4,7 @@ import bodyParser from 'body-parser';
 import cors from 'cors';
 import reservasRoutes from './routes/reservasRoutes.js';
 import canchasRoutes from './routes/canchasRoutes.js';
+import horariosRoutes from './routes/horariosRoutes.js';
 import multer from 'multer'; // Importar Multer
 
 const app = express();
@@ -26,6 +27,8 @@ app.get('/', (req, res) => {
 
 app.use('/api', reservasRoutes);
 app.use('/api', canchasRoutes);
+app.use('/api', horariosRoutes);
+
 
 
 const port = parseInt(process.env.PORT) || 3000;
