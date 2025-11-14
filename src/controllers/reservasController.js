@@ -5,34 +5,112 @@ import pool from '../config/db.js';
  * Verifica si hay conflicto de horario para una cancha específica.
  */
 const checkDisponibilidad = async (canchaId, fechaReserva, horaInicio, horaFin, reservaIdToExclude = null) => {
-    let sql = `
-        SELECT id
-        FROM reservas
-        WHERE cancha_id = ?
-        AND fecha_reserva = ?
-        AND estado IN ('pendiente', 'confirmada')
-        -- Conflicto si los rangos se solapan: (A_end > B_start AND A_start < B_end)
-        AND NOT (? >= hora_fin OR ? <= hora_inicio)
-    `;
-    const values = [canchaId, fechaReserva, horaFin, horaInicio];
-
-    if (reservaIdToExclude) {
-        sql += ` AND id != ?`;
-        values.push(reservaIdToExclude);
-    }
-
+    // Definimos el mapeo de días de la semana para SQL (MySQL WEEKDAY retorna 0=Lunes, 6=Domingo,
+    // pero si usamos ENUM como 'lunes', 'martes', necesitamos mapear la fecha.
+    // Asumiendo que dia_semana es ENUM ('lunes', 'martes', etc.)
+    const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+    const dia_semana_reserva = diasSemana[new Date(fechaReserva).getDay()];
     try {
-        const [rows] = await pool.query(sql, values);
-        return rows.length === 0; // True si está disponible
+        // --------------------------------------------------------------
+        // 1. VALIDAR RESERVAS SOLAPADAS (pendiente / confirmada)
+        // --------------------------------------------------------------
+        let sqlReservas = `
+            SELECT id
+            FROM reservas
+            WHERE cancha_id = ?
+            AND fecha_reserva = ?
+            AND estado IN ('pendiente', 'confirmada')
+            AND (hora_inicio < TIME(?) AND hora_fin > TIME(?))
+        `;
+
+       
+
+
+        const valuesReservas = [canchaId, fechaReserva, horaFin, horaInicio];
+
+        if (reservaIdToExclude) {
+            sqlReservas += ` AND id != ?`;
+            valuesReservas.push(reservaIdToExclude);
+        }
+
+        const [rowsReservas] = await pool.query(sqlReservas, valuesReservas);
+        if (rowsReservas.length > 0) {
+            console.log(`Conflicto con reserva ID: ${rowsReservas[0].id}`);
+            return false;
+        }
+        console.log("=== DEBUG RESERVAS ===");
+        console.log("SQL:", sqlReservas);
+        console.log("Values:", valuesReservas);
+        console.log("Resultados reservas:", rowsReservas);
+        // --------------------------------------------------------------
+        //  VALIDAR SOLICITUDES DE RESERVA PENDIENTES
+        // --------------------------------------------------------------
+        let sqlSolicitudes = `
+            SELECT sr.id
+            FROM solicitudes_reserva sr
+            INNER JOIN reservas r ON sr.reserva_id = r.id
+            WHERE sr.cancha_id = ?
+            AND sr.estado = 'pendiente'
+            AND r.fecha_reserva = ?
+            AND (r.hora_inicio < TIME(?) AND r.hora_fin > TIME(?))
+        `;
+
+        
+
+
+        const valuesSolicitudes = [canchaId, fechaReserva, horaFin, horaInicio];
+
+        if (reservaIdToExclude) {
+            sqlSolicitudes += ` AND sr.reserva_id != ?`;
+            valuesSolicitudes.push(reservaIdToExclude);
+        }
+
+        const [rowsSolicitudes] = await pool.query(sqlSolicitudes, valuesSolicitudes);
+        if (rowsSolicitudes.length > 0) {
+            console.log(`Conflicto con solicitud pendiente ID: ${rowsSolicitudes[0].id}`);
+            return false;
+        }
+console.log("=== DEBUG SOLICITUDES ===");
+console.log("SQL:", sqlSolicitudes);
+console.log("Values:", valuesSolicitudes);
+console.log("Resultados solicitudes:", rowsSolicitudes);
+        // --------------------------------------------------------------
+        //  VALIDAR HORARIOS BLOQUEADOS
+        // --------------------------------------------------------------
+        const sqlHorariosBloqueados = `
+            SELECT id
+            FROM horarios_cancha
+            WHERE cancha_id = ?
+            AND dia_semana = ?
+            AND esta_disponible = FALSE
+            AND (hora_inicio < ? AND hora_fin > ?)
+        `;       
+
+
+        const valuesHorarios = [canchaId, dia_semana_reserva, horaFin, horaInicio];
+
+        const [rowsHorarios] = await pool.query(sqlHorariosBloqueados, valuesHorarios);
+        if (rowsHorarios.length > 0) {
+            console.log(`Conflicto con horario bloqueado ID: ${rowsHorarios[0].id}`);
+            return false;
+        }
+
+        console.log("=== DEBUG BLOQUEOS ===");
+        console.log("SQL:", sqlHorariosBloqueados);
+        console.log("Values:", valuesHorarios);
+        console.log("Resultados bloqueos:", rowsHorarios);
+
+        return true; // Disponible
+
     } catch (error) {
         console.error("Error checking availability:", error);
-        return false; 
+        return false; // Seguridad
     }
 };
 
 // --- ENDPOINTS PARA EL CLIENTE (jugador) ---
 /**
- * POST /api/reservas: Crea una Solicitud de Reserva (Inicializa el flujo de aprobación).
+ * POST  Crea una Solicitud de Reserva (Inicializa el flujo de aprobación).
  */
 export const createSolicitud = async (req, res) => {
     const { cancha_id, equipo_id, usuario_solicitante_id, fecha_reserva, hora_inicio, hora_fin, duracion_horas, monto_total, mensaje_solicitud } = req.body;
@@ -40,38 +118,26 @@ export const createSolicitud = async (req, res) => {
     if (!cancha_id || !usuario_solicitante_id || !fecha_reserva || !hora_inicio || !hora_fin || !monto_total || !duracion_horas) {
         return res.status(400).json({ message: 'Missing required fields for reservation request.' });
     }
+
+    // VERIFICAR DISPONIBILIDAD (INCLUYE PENDIENTES Y CONFIRMADAS)
+    const disponible = await checkDisponibilidad(cancha_id, fecha_reserva, hora_inicio, hora_fin);
+    
+    if (!disponible) {
+        // Devolvemos 409 Conflict, indicando que el recurso de tiempo ya está tomado.
+        return res.status(409).json({ 
+            message: 'The requested time slot is already reserved, pending approval, or blocked by the owner.' 
+        });
+    }
     
     let connection; 
     try {
         connection = await pool.getConnection(); 
         await connection.beginTransaction(); 
-        
-        let usuario_acepto_rechazo_id;
-        
-       //  BYPASS TEMPORAL DE MOCKING PARA PRUEBAS 
-        // Únicamente asignamos el ID fijo y OMITIMOS la consulta a la base de datos.
-        console.log(" Usando ID de Propietario Mock (100) para evitar error de tabla faltante.");
-        usuario_acepto_rechazo_id = 100; 
-        
-        
-        /* 
-        //  LÓGICA  DESCOMENTAR ESTE BLOQUE CUANDO LA TABLA 'canchas' ESTE DISPONIBLE.
-        const [ownerData] = await connection.query(`
-            SELECT e.usuario_id 
-            FROM canchas c 
-            JOIN empresas e ON c.empresa_id = e.id 
-            WHERE c.id = ?
-        `, [cancha_id]);
 
-        if (ownerData.length === 0 || !ownerData[0].usuario_id) {
-            await connection.rollback();
-            return res.status(404).json({ message: 'Cancha not found or the associated Company User ID (empresas.usuario_id) is missing.' });
-        }
-        
-        usuario_acepto_rechazo_id = ownerData[0].usuario_id;
-        */
-        
-        // 2. Insertar en la tabla reservas con estado 'pendiente' (Reserva "placeholder")
+        // TEMPORAL - MOCK
+        const usuario_acepto_rechazo_id = 100;
+      
+        //  Insertar en la tabla reservas con estado 'pendiente' (Reserva "placeholder")
         const insertReservaSql = `
             INSERT INTO reservas (cancha_id, equipo_id, usuario_solicitante_id, fecha_reserva, hora_inicio, hora_fin, duracion_horas, monto_total, estado)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendiente')
@@ -84,14 +150,14 @@ export const createSolicitud = async (req, res) => {
         const [reservaResult] = await connection.query(insertReservaSql, insertReservaValues);
         const newReservaId = reservaResult.insertId;
 
-        // 3. Insertar la Solicitud de Reserva
+        //  Insertar la Solicitud de Reserva
         const insertSolicitudSql = `
             INSERT INTO solicitudes_reserva (reserva_id, cancha_id, usuario_solicitante_id, usuario_acepto_rechazo_id, mensaje_solicitud)
             VALUES (?, ?, ?, ?, ?)
         `;
         const insertSolicitudValues = [
             newReservaId, cancha_id, usuario_solicitante_id, usuario_acepto_rechazo_id, mensaje_solicitud || 'Solicitud sin mensaje.'
-        ];
+        ];        
         
         const [solicitudResult] = await connection.query(insertSolicitudSql, insertSolicitudValues);
         
@@ -119,7 +185,7 @@ export const createSolicitud = async (req, res) => {
 };
 
 /**
- * GET /api/reservas: Obtener todas las reservas (admin/dev)
+ * GET  Obtener todas las reservas (admin/dev)
  */
 export const getAllReservas = async (req, res) => {
     try {
