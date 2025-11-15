@@ -307,3 +307,121 @@ export const processSolicitud = async (req, res) => {
     }
 };
 
+/**
+ * DELETE /api/solicitudes/:solicitudId
+ * Elimina una solicitud y su reserva asociada SIN importar su estado.
+ */
+export const deleteSolicitud = async (req, res) => {
+    const { solicitudId } = req.params;
+
+    let connection;
+    try {
+        connection = await pool.getConnection();
+        await connection.beginTransaction();
+
+        // 1. Obtener solicitud
+        const [solicitud] = await connection.query(
+            "SELECT * FROM solicitudes_reserva WHERE id = ?",
+            [solicitudId]
+        );
+
+        if (solicitud.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ message: "Solicitud not found." });
+        }
+
+        const reservaId = solicitud[0].reserva_id;
+
+        // 2. Eliminar solicitud primero
+        await connection.query("DELETE FROM solicitudes_reserva WHERE id = ?", [
+            solicitudId,
+        ]);
+
+        // 3. Eliminar reserva asociada si existe
+        if (reservaId) {
+            await connection.query("DELETE FROM reservas WHERE id = ?", [
+                reservaId,
+            ]);
+        }
+
+        await connection.commit();
+
+        return res.status(200).json({
+            message: "Solicitud and associated reserva deleted permanently.",
+            solicitudId,
+            reservaId,
+        });
+
+    } catch (error) {
+        if (connection) await connection.rollback();
+        console.error("Error deleting solicitud:", error);
+        res.status(500).json({
+            message: "Internal server error deleting solicitud.",
+        });
+    } finally {
+        if (connection) connection.release();
+    }
+};
+
+/**
+ * DELETE /api/reservas/:reservaId
+ * Elimina una reserva y su solicitud asociada SIN importar su estado.
+ */
+export const deleteReserva = async (req, res) => {
+    const { reservaId } = req.params;
+
+    let connection;
+    try {
+        connection = await pool.getConnection();
+        await connection.beginTransaction();
+
+        // 1. Obtener reserva
+        const [reserva] = await connection.query(
+            "SELECT * FROM reservas WHERE id = ?",
+            [reservaId]
+        );
+
+        if (reserva.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ message: "Reserva not found." });
+        }
+
+        // 2. Buscar solicitud asociada
+        const [solicitud] = await connection.query(
+            "SELECT id FROM solicitudes_reserva WHERE reserva_id = ?",
+            [reservaId]
+        );
+
+        let solicitudId = null;
+
+        if (solicitud.length > 0) {
+            solicitudId = solicitud[0].id;
+            await connection.query(
+                "DELETE FROM solicitudes_reserva WHERE reserva_id = ?",
+                [reservaId]
+            );
+        }
+
+        // 3. Eliminar reserva
+        await connection.query("DELETE FROM reservas WHERE id = ?", [reservaId]);
+
+        await connection.commit();
+
+        return res.status(200).json({
+            message: "Reserva (and solicitud if existed) deleted permanently.",
+            reservaId,
+            solicitudId,
+        });
+
+    } catch (error) {
+        if (connection) await connection.rollback();
+        console.error("Error deleting reserva:", error);
+        res.status(500).json({
+            message: "Internal server error deleting reserva.",
+        });
+    } finally {
+        if (connection) connection.release();
+    }
+};
+
+
