@@ -424,4 +424,42 @@ export const deleteReserva = async (req, res) => {
     }
 };
 
+/**
+ * GET /api/reservas/:reservaId
+ * Obtiene una reserva por ID (incluye la solicitud asociada si existe)
+ */
+export const getReservaById = async (req, res) => {
+    const { reservaId } = req.params;
+
+    try {
+        // 1. Obtener la reserva
+        const [reserva] = await pool.query(
+            "SELECT * FROM reservas WHERE id = ?",
+            [reservaId]
+        );
+
+        if (reserva.length === 0) {
+            return res.status(404).json({ message: "Reserva not found." });
+        }
+
+        const reservaData = reserva[0];
+
+        // 2. Buscar si existe solicitud asociada
+        const [solicitud] = await pool.query(
+            "SELECT * FROM solicitudes_reserva WHERE reserva_id = ?",
+            [reservaId]
+        );
+
+        return res.status(200).json({
+            reserva: reservaData,
+            solicitud: solicitud.length > 0 ? solicitud[0] : null
+        });
+
+    } catch (error) {
+        console.error("Error fetching reserva by ID:", error);
+        res.status(500).json({
+            message: "Internal server error fetching reserva."
+        });
+    }
+};
 
