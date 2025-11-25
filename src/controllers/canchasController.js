@@ -7,10 +7,10 @@ import pool from '../config/db.js';
  */
 export const createCancha = async (req, res) => {
     // Nota: 'empresa_id' es crucial para asociar la cancha a un propietario/empresa.
-    const { 
-        empresa_id, tipo_deporte_id, nombre, descripcion, superficie, 
-        esta_techada, capacidad_jugadores, largo_metros, ancho_metros, 
-        precio_hora, precio_hora_fin_semana, ubicacion, 
+    const {
+        empresa_id, tipo_deporte_id, nombre, descripcion, superficie,
+        esta_techada, capacidad_jugadores, largo_metros, ancho_metros,
+        precio_hora, precio_hora_fin_semana, ubicacion,
         servicios_adicionales, coordenadas_lat, coordenadas_lng
     } = req.body;
 
@@ -18,7 +18,7 @@ export const createCancha = async (req, res) => {
     // El 'req.file' contiene metadata y el buffer binario del archivo.
     // Usamos 'req.file.buffer' para el campo BLOB de MySQL.
     const imagenData = req.file ? req.file.buffer : null;
-    
+
     // Validación básica de campos requeridos
     if (!empresa_id || !nombre || !precio_hora) {
         return res.status(400).json({ message: 'Missing required fields: empresa_id, nombre, and precio_hora.' });
@@ -34,38 +34,38 @@ export const createCancha = async (req, res) => {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
         const values = [
-            empresa_id, 
-            tipo_deporte_id, 
-            nombre, 
-            descripcion, 
-            superficie || 'cesped_sintetico', 
-            esta_techada || false, 
-            capacidad_jugadores, 
-            largo_metros, 
-            ancho_metros, 
-            precio_hora, 
-            precio_hora_fin_semana, 
+            empresa_id,
+            tipo_deporte_id,
+            nombre,
+            descripcion,
+            superficie || 'cesped_sintetico',
+            esta_techada || false,
+            capacidad_jugadores,
+            largo_metros,
+            ancho_metros,
+            precio_hora,
+            precio_hora_fin_semana,
             imagenData || null, // Para BLOB, si no se envía, usa null
             servicios_adicionales ? JSON.stringify(servicios_adicionales) : null, // JSON debe ser serializado
             ubicacion,
             coordenadas_lat,
             coordenadas_lng
         ];
-        
+
         const [result] = await pool.query(sql, values);
         const newCanchaId = result.insertId;
 
-        res.status(201).json({ 
-            message: 'Cancha created successfully.', 
+        res.status(201).json({
+            message: 'Cancha created successfully.',
             canchaId: newCanchaId,
-            empresaId: empresa_id 
+            empresaId: empresa_id
         });
 
     } catch (error) {
         console.error('Error creating cancha:', error);
         // ER_NO_REFERENCED_ROW_2: Si empresa_id no existe en la tabla empresas
         if (error.code === 'ER_NO_REFERENCED_ROW_2') {
-             return res.status(409).json({ message: 'Foreign Key Constraint Failed: The provided empresa_id does not exist.' });
+            return res.status(409).json({ message: 'Foreign Key Constraint Failed: The provided empresa_id does not exist.' });
         }
         res.status(500).json({ message: 'Internal server error creating the cancha.' });
     }
@@ -76,29 +76,29 @@ export const createCancha = async (req, res) => {
  */
 export const getCanchaPropietario = async (req, res) => {
     const { canchaId } = req.params;
-    
+
     try {
         const [rows] = await pool.query('SELECT empresa_id FROM canchas WHERE id = ?', [canchaId]);
 
         if (rows.length === 0) {
             return res.status(404).json({ message: 'Cancha not found.' });
         }
-        
+
         const empresaId = rows[0].empresa_id;
-        
+
         if (!empresaId) {
             return res.status(404).json({ message: 'Cancha found, but no empresa_id associated.' });
         }
-        
+
         // Simulación de obtener el ID de usuario del propietario
         // En un microservicio real, aquí se haría una llamada a la API de Usuarios/Empresas
         // para buscar el ID de usuario asociado a esta empresaId.
-        
+
         // Mockeamos el usuario_propietario_id para la EmpresaId:
-        const usuarioPropietarioId = 100; 
+        const usuarioPropietarioId = 100;
 
         // El servicio de Reservas SOLO necesita el ID del usuario procesador (100)
-        res.status(200).json({ 
+        res.status(200).json({
             cancha_id: parseInt(canchaId),
             empresa_id: empresaId,
             usuario_propietario_id: usuarioPropietarioId // Este es el ID que usará Reservas
@@ -122,14 +122,14 @@ export const getCanchaById = async (req, res) => {
         if (rows.length === 0) {
             return res.status(404).json({ message: 'Cancha not found.' });
         }
-        
+
         const cancha = rows[0];
 
         // Convertimos el Buffer BLOB a un string Base64 para enviarlo al cliente
         if (cancha.imagenes) {
             cancha.imagenes = Buffer.from(cancha.imagenes).toString('base64');
         }
-        
+
         res.status(200).json(cancha);
     } catch (error) {
         console.error('Error fetching cancha by ID:', error);
@@ -138,21 +138,36 @@ export const getCanchaById = async (req, res) => {
 };
 
 /**
- * GET  Obtiene un listado de todas las canchas activas.
+ * GET  Obtiene un listado de todas las canchas activas, incluyendo las imágenes BLOB convertidas a Base64.
+ * NOTA: Esta consulta será mucho más pesada.
  */
 export const getAllCanchas = async (req, res) => {
     try {
         const sql = `
-            SELECT id, empresa_id, nombre, superficie, esta_techada, capacidad_jugadores, 
-            precio_hora, ubicacion, calificacion_promedio, estado, esta_activa
-            FROM canchas
-            WHERE esta_activa = TRUE AND estado != 'inactiva'
-            ORDER BY calificacion_promedio DESC, nombre ASC
-        `;
+  SELECT 
+   id, empresa_id, nombre, superficie, esta_techada, capacidad_jugadores, 
+   precio_hora, ubicacion, calificacion_promedio, estado, esta_activa,
+    imagenes  /* <-- CAMBIO 1: AGREGAMOS LA COLUMNA IMAGENES */
+    FROM canchas
+     WHERE esta_activa = TRUE AND estado != 'inactiva'
+     ORDER BY calificacion_promedio DESC, nombre ASC
+`;
+
         const [rows] = await pool.query(sql);
-        res.status(200).json(rows);
+
+        // <-- CAMBIO 2: ITERAMOS Y CONVERTIMOS CADA BLOB A BASE64 -->
+        const canchasConImagenes = rows.map(cancha => {
+            // Verificamos si existe el dato BLOB
+            if (cancha.imagenes) {
+                // Convertimos el Buffer BLOB a un string Base64
+                cancha.imagenes = Buffer.from(cancha.imagenes).toString('base64');
+            }
+            return cancha;
+        });
+
+        res.status(200).json(canchasConImagenes); // Enviamos el array procesado
     } catch (error) {
-        console.error('Error fetching all canchas:', error);
+        console.error('Error fetching all canchas with images:', error);
         res.status(500).json({ message: 'Internal server error fetching canchas list.' });
     }
 };
@@ -164,16 +179,16 @@ export const getAllCanchas = async (req, res) => {
  */
 export const updateCancha = async (req, res) => {
     const { canchaId } = req.params;
-    const { 
-        nombre, descripcion, superficie, esta_techada, capacidad_jugadores, 
-        precio_hora, precio_hora_fin_semana, ubicacion, servicios_adicionales, 
-        coordenadas_lat, coordenadas_lng, estado, esta_activa, 
+    const {
+        nombre, descripcion, superficie, esta_techada, capacidad_jugadores,
+        precio_hora, precio_hora_fin_semana, ubicacion, servicios_adicionales,
+        coordenadas_lat, coordenadas_lng, estado, esta_activa,
         imagenes
     } = req.body;
-    
+
     // Obtener el buffer si se usa Multer (multipart/form-data)
-    const nuevaImagenData = req.file ? req.file.buffer : undefined; 
-    
+    const nuevaImagenData = req.file ? req.file.buffer : undefined;
+
     try {
         let updates = [];
         let values = [];
@@ -191,11 +206,11 @@ export const updateCancha = async (req, res) => {
         if (esta_activa !== undefined) { updates.push('esta_activa = ?'); values.push(esta_activa); }
         if (coordenadas_lat !== undefined) { updates.push('coordenadas_lat = ?'); values.push(coordenadas_lat); }
         if (coordenadas_lng !== undefined) { updates.push('coordenadas_lng = ?'); values.push(coordenadas_lng); }
-        
+
         // Manejo del campo JSON: servicios_adicionales
-        if (servicios_adicionales !== undefined) { 
-            updates.push('servicios_adicionales = ?'); 
-            values.push(JSON.stringify(servicios_adicionales)); 
+        if (servicios_adicionales !== undefined) {
+            updates.push('servicios_adicionales = ?');
+            values.push(JSON.stringify(servicios_adicionales));
         }
 
         //  Manejo del campo BLOB: imagenes 
@@ -208,12 +223,12 @@ export const updateCancha = async (req, res) => {
             updates.push('imagenes = ?');
             values.push(null);
         }
-        
+
         if (updates.length === 0) {
             return res.status(400).json({ message: 'No fields provided for update.' });
         }
 
-        values.push(canchaId); 
+        values.push(canchaId);
 
         const sql = `
             UPDATE canchas 
@@ -226,7 +241,7 @@ export const updateCancha = async (req, res) => {
         if (result.affectedRows === 0) {
             return res.status(404).json({ message: 'Cancha not found or no changes made.' });
         }
-        
+
         res.status(200).json({ message: 'Cancha updated successfully.', canchaId: canchaId });
 
     } catch (error) {
@@ -240,7 +255,7 @@ export const updateCancha = async (req, res) => {
  */
 export const disableCancha = async (req, res) => {
     const { canchaId } = req.params;
-    
+
     try {
         // Ponemos esta_activa en FALSE e indicamos que el estado es 'inactiva'
         const sql = `
@@ -253,10 +268,10 @@ export const disableCancha = async (req, res) => {
         if (result.affectedRows === 0) {
             return res.status(404).json({ message: 'Cancha not found.' });
         }
-        
-        res.status(200).json({ 
-            message: `Cancha ${canchaId} has been successfully disabled.`, 
-            estado: 'inactiva' 
+
+        res.status(200).json({
+            message: `Cancha ${canchaId} has been successfully disabled.`,
+            estado: 'inactiva'
         });
 
     } catch (error) {
@@ -270,7 +285,7 @@ export const disableCancha = async (req, res) => {
  */
 export const enableCancha = async (req, res) => {
     const { canchaId } = req.params;
-    
+
     try {
         const sql = `
             UPDATE canchas 
@@ -282,10 +297,10 @@ export const enableCancha = async (req, res) => {
         if (result.affectedRows === 0) {
             return res.status(404).json({ message: 'Cancha not found.' });
         }
-        
-        res.status(200).json({ 
-            message: `Cancha ${canchaId} has been successfully enabled.`, 
-            estado: 'disponible' 
+
+        res.status(200).json({
+            message: `Cancha ${canchaId} has been successfully enabled.`,
+            estado: 'disponible'
         });
 
     } catch (error) {
